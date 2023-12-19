@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
+const jwt = require('jsonwebtoken');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config();
 const app = express();
@@ -7,12 +9,15 @@ const port = process.env.PORT || 5000;
 
 
 // middleware
-app.use(cors())
+app.use(cors({
+  origin: ['http://localhost:5173'],
+  credentials: true,
+}))
 app.use(express.json())
-
+app.use(cookieParser());
 // mongoDB
 console.log('The password is: ',process.env.DB_PASS)
-// SKcQICr4QIorrXlS
+
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.ekh1qyr.mongodb.net/?retryWrites=true&w=majority`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -24,7 +29,17 @@ const client = new MongoClient(uri, {
   }
 });
 
-    
+// Own Middlewares
+const logger = (req, res, next) => {
+  console.log('Logger info: ', req.method, req.url);
+  next();
+}  
+
+const verifyToken = (req, res, next) => {
+  const token = req?.cookies?.token;
+  console.log('token in the middleware: ', token);
+  next();
+}
 
 async function run() {
   try {
@@ -34,6 +49,29 @@ async function run() {
     const servicesCollection = client.db('carDoctor').collection('services');
     const bookingCollection = client.db('carDoctor').collection('booking');
 
+
+    // Auth related API
+    app.post('/jwt', async(req, res) => {
+      const user = req.body;
+      console.log('Token for this email: ', user);
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {expiresIn : '1h'})
+
+      res
+      .cookie('token', token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'none',
+      })
+      .send({success: true});
+    })
+
+    app.post('/logout', async(req, res)=> {
+      const user = req.body;
+      console.log('logging out: ', user);
+      res.clearCookie('token', {maxAge: 0}).send({success: true})
+    })
+
+    // Services
     app.get('/services', async(req, res) => {
         const cursor = servicesCollection.find();
         const result = await cursor.toArray();
@@ -55,9 +93,10 @@ async function run() {
       res.send(result)
     })
 
-    app.get('/booking', async(req, res) => {
+    app.get('/booking', logger, verifyToken, async(req, res) => {
       // const query = req.query;
-      console.log(req.query.email);
+      // console.log(req?.query?.email);
+      // console.log('Cook Cookies is: ', req?.cookies?.token)
       let query = {};
       if(req.query?.email){
         query = {email : req.query.email};
